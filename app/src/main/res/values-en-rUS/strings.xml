@@ -82,4 +82,7 @@
     <string name="toastValida_ErroTel">Invalid Phone.\nFormat: (+XX) XX XXXXX-XXXX</string>
     <string name="toastHome_TaskRent_bikeErroStatus">Error trying to get Status!</string>
     <string name="alertMsg_EntreCVC">"You must enter the CVC code of the card ending in "</string>
+    <string name="status_created">Payment Created...</string>
+    <string name="status_waiting">Waiting Payment...</string>
+    <string name="status_not_paid">Payment not authorized!</string>
 </resources>

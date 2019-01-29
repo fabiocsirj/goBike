@@ -1,6 +1,7 @@
 package br.com.appwarehouse.gobike
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -11,17 +12,16 @@ import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
 import android.support.v4.app.ActivityCompat
 import android.support.v7.app.AlertDialog
+import android.util.Log
 import android.view.View
-import android.widget.Button
-import android.widget.ImageView
-import android.widget.TextView
-import android.widget.Toast
+import android.widget.*
 import com.google.android.gms.location.LocationServices
 import khttp.structures.authorization.BasicAuthorization
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.text.SimpleDateFormat
 
 class Home : AppCompatActivity() {
     private var myLocation: Location? = null
@@ -40,6 +40,7 @@ class Home : AppCompatActivity() {
 
     override fun onStart() {
         reloadMyLocation()
+        getStatus()
 
         if (Prefs.id > 0) {
             findViewById<ImageView>(R.id.iv_login).setImageResource(R.drawable.user2)
@@ -53,6 +54,16 @@ class Home : AppCompatActivity() {
         }
 
         super.onStart()
+    }
+
+    override fun onStop() {
+        val clock = findViewById<Chronometer>(R.id.clock)
+        if (clock.visibility == View.VISIBLE) {
+            findViewById<ImageView>(R.id.iv_clock).visibility = View.INVISIBLE
+            clock.stop()
+            clock.visibility = View.INVISIBLE
+        }
+        super.onStop()
     }
 
     private fun getMoipInfo() {
@@ -132,12 +143,14 @@ class Home : AppCompatActivity() {
                   "?lat=" + myLocation!!.latitude +
                   "&lon=" + myLocation!!.longitude +
                   "&raio=" + Prefs.raio
+        Log.i("goBike", "Send Server: $url")
 
         GlobalScope.launch(Dispatchers.Main) {
             val deferred = async(Dispatchers.Default) {
                 khttp.get(url = url).text
             }
             val respStations = deferred.await()
+            Log.i("goBike", "Receive Server: $respStations")
 
             try {
                 if (JSONArray(respStations).length() > 0) {
@@ -189,6 +202,7 @@ class Home : AppCompatActivity() {
     private fun deleteUser() {
         Toast.makeText(this, R.string.toast_Excluindo, Toast.LENGTH_SHORT).show()
         val url = "http://gobike2.jelasticlw.com.br/cliente/user?id=${Prefs.id}&code=${Prefs.code}"
+        Log.i("goBike", "Send Server: $url")
 
         GlobalScope.launch(Dispatchers.Main) {
             val deferred = async(Dispatchers.Default) {
@@ -200,8 +214,9 @@ class Home : AppCompatActivity() {
                 }
             }
             val respDel = deferred.await()
+            Log.i("goBike", "Receive Server: $respDel")
 
-            if (respDel.getBoolean("ok")) {
+            if (respDel.has("ok") && respDel.getBoolean("ok")) {
                 Toast.makeText(applicationContext, R.string.toastHome_TaskUser_contaExcluida, Toast.LENGTH_LONG).show()
                 logout()
             } else Toast.makeText(applicationContext, R.string.toastHome_TaskUser_erroConta, Toast.LENGTH_LONG).show()
@@ -235,6 +250,7 @@ class Home : AppCompatActivity() {
     private fun deleteCard() {
         Toast.makeText(this, R.string.toast_Excluindo, Toast.LENGTH_SHORT).show()
         val url = "http://gobike2.jelasticlw.com.br/cliente/card?id=${Prefs.id}&code=${Prefs.code}"
+        Log.i("goBike", "Send Server: $url")
 
         GlobalScope.launch(Dispatchers.Main) {
             val deferred = async(Dispatchers.Default) {
@@ -246,8 +262,9 @@ class Home : AppCompatActivity() {
                 }
             }
             val respDel = deferred.await()
+            Log.i("goBike", "Receive Server: $respDel")
 
-            if (respDel.getBoolean("ok")) {
+            if (respDel.has("ok") && respDel.getBoolean("ok")) {
                 Toast.makeText(applicationContext, R.string.toastHome_TaskUser_cartaoExcluido, Toast.LENGTH_LONG).show()
                 Prefs.removeCard()
                 findViewById<ImageView>(R.id.iv_card).setImageResource(R.drawable.creditcard1)
@@ -292,29 +309,117 @@ class Home : AppCompatActivity() {
     }
 
     fun doBtnGo(v: View?) {
-        goQRCode()
-    }
-
-    private fun goQRCode() {
         val cameraPermission = (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
         if (!cameraPermission) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 61)
-        else {
-            val intent = Intent(this, QRCode::class.java)
-            startActivityForResult(intent, 62)
-        }
+        else goQRCode()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (requestCode == 61 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            val intent = Intent(this, QRCode::class.java)
-            startActivityForResult(intent, 62)
-        }
+        if (requestCode == 61 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) goQRCode()
+    }
+
+    private fun goQRCode() {
+        val intent = Intent(this, QRCode::class.java)
+        startActivityForResult(intent, 62)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == 62 && resultCode == Activity.RESULT_OK) {
             val qrcode = data?.getStringExtra("qrcode")
-            Toast.makeText(this, qrcode, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bike: $qrcode", Toast.LENGTH_LONG).show()
+            rentBike(qrcode!!.toInt())
         }
     }
+
+    private fun rentBike(id_bik: Int) {
+        val url = "http://gobike2.jelasticlw.com.br/rent/rent?" +
+                  "id_cli=${Prefs.id}&code=${Prefs.code}&id_bik=$id_bik&moip=${Prefs.moip}&crc=${Prefs.card}&cvc=${Prefs.cvc}"
+        Log.i("goBike", "Send Server: $url")
+
+        GlobalScope.launch(Dispatchers.Main) {
+            val deferred = async(Dispatchers.Default) {
+                try {
+                    khttp.post(url = url).jsonObject
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                    JSONObject()
+                }
+            }
+            val respRent = deferred.await()
+            Log.i("goBike", "Receive Server: $respRent")
+
+            if (respRent.has("ok") && respRent.getBoolean("ok")) getStatus()
+        }
+    }
+
+    private fun getStatus() {
+        val url = "http://gobike2.jelasticlw.com.br/rent/status?id_cli=${Prefs.id}&code=${Prefs.code}"
+        Log.i("goBike", "Send Server: $url")
+
+        GlobalScope.launch(Dispatchers.Main) {
+            val deferred = async(Dispatchers.Default) {
+                try {
+                    khttp.get(url = url).jsonObject
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                    JSONObject()
+                }
+            }
+            val respStatus = deferred.await()
+            Log.i("goBike", "Receive Server: $respStatus")
+
+            if (respStatus.has("ok") && respStatus.getBoolean("ok")) {
+                val status = Status.values()[respStatus.getInt("status")]
+
+                val tv_status = findViewById<TextView>(R.id.tv_status)
+                if (status == Status.NO_RENT || status == Status.PAID) tv_status.visibility = View.INVISIBLE
+                else tv_status.visibility = View.VISIBLE
+
+                when(status) {
+                    Status.NO_RENT -> Log.i("goBike", "Status: NO_RENT")
+                    Status.CREATED -> tv_status.text = resources.getText(R.string.status_created)
+                    Status.WAITING -> tv_status.text = resources.getText(R.string.status_waiting)
+                    Status.PAID -> tictac(respStatus.getString("check_in"))
+                    Status.NOT_PAID -> tv_status.text = resources.getText(R.string.status_not_paid)
+                    Status.REVERTED -> tv_status.text = resources.getText(R.string.status_not_paid)
+                    Status.ERR_STATUS -> Log.i("goBike", "Status: ERR_STATUS")
+                    Status.PEND_PAID -> Log.i("goBike", "Status: PEND_PAID")
+                }
+
+                if (status == Status.CREATED || status == Status.WAITING) waitAndGetStatus(10)
+            }
+        }
+    }
+
+    private fun waitAndGetStatus(seconds: Long) {
+        GlobalScope.launch {
+            Log.i("goBike", "Espera $seconds segundos para novo status...")
+            delay(seconds * 1000)
+            getStatus()
+        }
+    }
+
+    @SuppressLint("SimpleDateFormat")
+    private fun tictac(check_in: String) {
+        val format = SimpleDateFormat("yyyy-M-dd HH:mm:ss")
+        val check_in_date = format.parse(check_in)
+
+        findViewById<ImageView>(R.id.iv_clock).visibility = View.VISIBLE
+        val clock = findViewById<Chronometer>(R.id.clock)
+        clock.visibility = View.VISIBLE
+        clock.base = clock.base - (System.currentTimeMillis() - check_in_date.time)
+        clock.start()
+    }
+
+}
+
+private enum class Status {
+    NO_RENT,
+    CREATED,
+    WAITING,
+    PAID,
+    NOT_PAID,
+    REVERTED,
+    ERR_STATUS,
+    PEND_PAID
 }

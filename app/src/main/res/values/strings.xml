@@ -92,4 +92,7 @@
     <string name="toastValida_ErroTel">Telefone inválido.\nFormato: (+DDI) DDD XXXXX-XXXX</string>
     <string name="toastHome_TaskRent_bikeErroStatus">Erro ao tentar pegar Status!</string>
     <string name="alertMsg_EntreCVC">"Você deve entrar com o código CVC do cartão terminado em "</string>
+    <string name="status_created">Pagamento Criado...</string>
+    <string name="status_waiting">Aguardando Pagamento...</string>
+    <string name="status_not_paid">Pagamento não autorizado!</string>
 </resources>

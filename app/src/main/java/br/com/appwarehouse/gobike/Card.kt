@@ -12,6 +12,7 @@ import khttp.structures.authorization.BasicAuthorization
 import kotlinx.coroutines.*
 import org.json.JSONException
 import org.json.JSONObject
+import java.net.URLEncoder
 
 class Card : AppCompatActivity() {
     private var newCard: Boolean = true
@@ -158,7 +159,8 @@ class Card : AppCompatActivity() {
     private fun saveCardPrefs(cvc: String) {
         Prefs.card = crc
         Prefs.last4 = last4
-        Prefs.cvc = Criptografia.crypt(cvc)?: ""
+        val cvcCrypt = Criptografia.crypt(cvc)?: ""
+        Prefs.cvc = URLEncoder.encode(cvcCrypt, "UTF-8")
         Toast.makeText(applicationContext, R.string.toastCard_Ok, Toast.LENGTH_LONG).show()
         finish()
     }
