@@ -10,6 +10,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.support.v7.app.AppCompatActivity
 import android.os.Bundle
+import android.os.SystemClock
 import android.support.v4.app.ActivityCompat
 import android.support.v7.app.AlertDialog
 import android.util.Log
@@ -26,6 +27,8 @@ import java.text.SimpleDateFormat
 class Home : AppCompatActivity() {
     private var myLocation: Location? = null
     private var stations = "[]"
+    private var status = Status.NO_RENT
+    private var idRent = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,16 +57,6 @@ class Home : AppCompatActivity() {
         }
 
         super.onStart()
-    }
-
-    override fun onStop() {
-        val clock = findViewById<Chronometer>(R.id.clock)
-        if (clock.visibility == View.VISIBLE) {
-            findViewById<ImageView>(R.id.iv_clock).visibility = View.INVISIBLE
-            clock.stop()
-            clock.visibility = View.INVISIBLE
-        }
-        super.onStop()
     }
 
     private fun getMoipInfo() {
@@ -298,20 +291,57 @@ class Home : AppCompatActivity() {
     }
 
     private fun setBtnGo() {
+        val stationsNear = (JSONArray(stations).length() > 0)
+        val togetherStation = if (stationsNear) isTogetherStation() else false
         val btnGo = findViewById<Button>(R.id.go)
-        if ((Prefs.id > 0) && Prefs.last4.isNotEmpty() && (JSONArray(stations).length() > 0)) {
+        btnGo.isEnabled = false
+
+        if (status == Status.PAID) { // Está com bike alugada
+            btnGo.text = resources.getText(R.string.btnDevolver)
+            if (togetherStation) btnGo.setBackgroundResource(R.drawable.bg_round_red)
+            else btnGo.setBackgroundResource(R.drawable.bg_round_grey)
             btnGo.isEnabled = true
-            btnGo.setBackgroundResource(R.drawable.bg_round_green)
         } else {
-            btnGo.isEnabled = false
-            btnGo.setBackgroundResource(R.drawable.bg_round_black)
+            if (status == Status.CREATED || status == Status.WAITING) { // Está tentando alugar
+                btnGo.text = resources.getText(R.string.btnCancel)
+                btnGo.setBackgroundResource(R.drawable.bg_round_red)
+                btnGo.isEnabled = true
+            } else { // Está NO_RENT
+                btnGo.text = "GO"
+                if ((Prefs.id > 0) && Prefs.last4.isNotEmpty() && stationsNear) {
+                    btnGo.setBackgroundResource(R.drawable.bg_round_green)
+                    btnGo.isEnabled = true
+                } else btnGo.setBackgroundResource(R.drawable.bg_round_black)
+            }
         }
     }
 
+    private fun isTogetherStation(): Boolean {
+        var ret = false
+        for (i in 0 until JSONArray(stations).length()) {
+            val station = JSONArray(stations).getJSONObject(i)
+            val locStation = Location("")
+            locStation.latitude = station.getDouble("lat")
+            locStation.longitude = station.getDouble("lon")
+            if (myLocation!!.distanceTo(locStation) < 10) {
+                ret = true
+                break
+            }
+        }
+        return ret
+    }
+
     fun doBtnGo(v: View?) {
-        val cameraPermission = (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
-        if (!cameraPermission) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 61)
-        else goQRCode()
+        if (status == Status.PAID) stopRent() // Devolvendo bike
+        else {
+            if (status == Status.CREATED || status == Status.WAITING) { // Está tentando alugar
+                Log.i("goBike", "Cancelando id_rent: $idRent")
+            } else { // Está NO_RENT
+                val cameraPermission = (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+                if (!cameraPermission) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 61)
+                else goQRCode()
+            }
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -369,7 +399,8 @@ class Home : AppCompatActivity() {
             Log.i("goBike", "Receive Server: $respStatus")
 
             if (respStatus.has("ok") && respStatus.getBoolean("ok")) {
-                val status = Status.values()[respStatus.getInt("status")]
+                status = Status.values()[respStatus.getInt("status")]
+                idRent = respStatus.getInt("id_rent")
 
                 val tv_status = findViewById<TextView>(R.id.tv_status)
                 if (status == Status.NO_RENT || status == Status.PAID) tv_status.visibility = View.INVISIBLE
@@ -387,6 +418,8 @@ class Home : AppCompatActivity() {
                 }
 
                 if (status == Status.CREATED || status == Status.WAITING) waitAndGetStatus(10)
+
+                setBtnGo()
             }
         }
     }
@@ -401,14 +434,48 @@ class Home : AppCompatActivity() {
 
     @SuppressLint("SimpleDateFormat")
     private fun tictac(check_in: String) {
-        val format = SimpleDateFormat("yyyy-M-dd HH:mm:ss")
-        val check_in_date = format.parse(check_in)
-
-        findViewById<ImageView>(R.id.iv_clock).visibility = View.VISIBLE
         val clock = findViewById<Chronometer>(R.id.clock)
-        clock.visibility = View.VISIBLE
-        clock.base = clock.base - (System.currentTimeMillis() - check_in_date.time)
-        clock.start()
+        if (clock.visibility == View.INVISIBLE) {
+            val format = SimpleDateFormat("yyyy-M-dd HH:mm:ss")
+            val check_in_date = format.parse(check_in)
+            findViewById<ImageView>(R.id.iv_clock).visibility = View.VISIBLE
+            clock.base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - check_in_date.time)
+            clock.start()
+            clock.visibility = View.VISIBLE
+        }
+    }
+
+    private fun stopRent() {
+        val url = "http://gobike2.jelasticlw.com.br/rent/stop?" +
+                  "id_cli=${Prefs.id}&code=${Prefs.code}&crc=${Prefs.card}&cvc=${Prefs.cvc}&id_rent=$idRent"
+        Log.i("goBike", "Send Server: $url")
+
+        GlobalScope.launch(Dispatchers.Main) {
+            val deferred = async(Dispatchers.Default) {
+                try {
+                    khttp.post(url = url).jsonObject
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                    JSONObject()
+                }
+            }
+            val respStop = deferred.await()
+            Log.i("goBike", "Receive Server: $respStop")
+
+            if (respStop.has("ok") && respStop.getBoolean("ok")) {
+                hiddenChron()
+                getStatus()
+            }
+        }
+    }
+
+    private fun hiddenChron() {
+        val clock = findViewById<Chronometer>(R.id.clock)
+        if (clock.visibility == View.VISIBLE) {
+            findViewById<ImageView>(R.id.iv_clock).visibility = View.INVISIBLE
+            clock.stop()
+            clock.visibility = View.INVISIBLE
+        }
     }
 
 }

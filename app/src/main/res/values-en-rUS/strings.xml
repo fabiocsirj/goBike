@@ -85,4 +85,5 @@
     <string name="status_created">Payment Created...</string>
     <string name="status_waiting">Waiting Payment...</string>
     <string name="status_not_paid">Payment not authorized!</string>
+    <string name="btnCancel">CANCEL</string>
 </resources>
