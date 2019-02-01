@@ -96,4 +96,5 @@
     <string name="status_waiting">Aguardando Pagamento...</string>
     <string name="status_not_paid">Pagamento não autorizado!</string>
     <string name="btnCancel">CANCELAR</string>
+    <string name="alertCost">Pegando Valores...</string>
 </resources>

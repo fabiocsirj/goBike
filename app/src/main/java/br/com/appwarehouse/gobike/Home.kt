@@ -22,7 +22,10 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.text.SimpleDateFormat
+import java.util.*
 
 class Home : AppCompatActivity() {
     private var myLocation: Location? = null
@@ -222,7 +225,7 @@ class Home : AppCompatActivity() {
                 val intent = Intent(this, Card::class.java)
                 startActivity(intent)
             } else popupCard()
-        } else alert(R.string.toastHome_goCard_error)
+        } else alert(resources.getString(R.string.toastHome_goCard_error))
     }
 
     private fun popupCard() {
@@ -267,13 +270,21 @@ class Home : AppCompatActivity() {
         }
     }
 
-    private fun alert(msg: Int) {
+    private fun alert(msg: String, fn: ((Int) -> Unit)? = null, x: Int = 0) {
         val alertBuilder = AlertDialog.Builder(this)
         alertBuilder.setTitle(R.string.alertTitle_Atencao)
             .setMessage(msg)
-            .setNeutralButton("Ok") {
+            .setPositiveButton("Ok") {
+                dialog, _ -> run {
+                    if (fn == null) dialog.cancel()
+                    else fn(x)
+                }
+            }
+        if (fn != null) {
+            alertBuilder.setNeutralButton(resources.getText(R.string.btnCancel)) {
                 dialog, _ -> dialog.cancel()
             }
+        }
         val alert = alertBuilder.create()
         alert.show()
     }
@@ -332,11 +343,10 @@ class Home : AppCompatActivity() {
     }
 
     fun doBtnGo(v: View?) {
-        if (status == Status.PAID) stopRent() // Devolvendo bike
+        if (status == Status.PAID) rentStop() // Devolvendo bike
         else {
-            if (status == Status.CREATED || status == Status.WAITING) { // Está tentando alugar
-                Log.i("goBike", "Cancelando id_rent: $idRent")
-            } else { // Está NO_RENT
+            if (status == Status.CREATED || status == Status.WAITING) rentCancel() // Cancelando Rent
+            else { // Está NO_RENT
                 val cameraPermission = (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
                 if (!cameraPermission) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), 61)
                 else goQRCode()
@@ -356,13 +366,50 @@ class Home : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == 62 && resultCode == Activity.RESULT_OK) {
             val qrcode = data?.getStringExtra("qrcode")
-            Toast.makeText(this, "Bike: $qrcode", Toast.LENGTH_LONG).show()
-            rentBike(qrcode!!.toInt())
+            //Toast.makeText(this, "Bike: $qrcode", Toast.LENGTH_LONG).show()
+            getCost(qrcode!!.toInt())
         }
     }
 
-    private fun rentBike(id_bik: Int) {
-        val url = "http://gobike2.jelasticlw.com.br/rent/rent?" +
+    private fun getCost(id_bik: Int) {
+        Toast.makeText(this, R.string.alertCost, Toast.LENGTH_SHORT).show()
+        val url = "http://gobike2.jelasticlw.com.br/rent/cost?id_bik=$id_bik"
+        Log.i("goBike", "Send Server: $url")
+
+        GlobalScope.launch(Dispatchers.Main) {
+            val deferred = async(Dispatchers.Default) {
+                try {
+                    khttp.get(url = url).jsonObject
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                    JSONObject()
+                }
+            }
+            val respCost = deferred.await()
+            Log.i("goBike", "Receive Server: $respCost")
+
+            if ((respCost.has("ok")) && (respCost.getBoolean("ok"))) {
+                val df = DecimalFormat("#,##0.00")
+                df.decimalFormatSymbols = DecimalFormatSymbols(Locale.ITALY)
+                val s = df.format(respCost.getDouble("start"))
+                val i = respCost.getInt("lotini")
+                val p = df.format(respCost.getDouble("price"))
+                val l = respCost.getInt("lot")
+
+                val msg = "${resources.getString(R.string.confirmRent_msg0)}" +
+                          "${resources.getString(R.string.confirmRent_msg1)}$s" +
+                          "${resources.getString(R.string.confirmRent_msg2)}$i" +
+                          "${resources.getString(R.string.confirmRent_msg3)}$p" +
+                          "${resources.getString(R.string.confirmRent_msg4)}$l" +
+                          "${resources.getString(R.string.confirmRent_msg5)}"
+
+                alert(msg, ::rentStart, id_bik)
+            }
+        }
+    }
+
+    private fun rentStart(id_bik: Int) {
+        val url = "http://gobike2.jelasticlw.com.br/rent/start?" +
                   "id_cli=${Prefs.id}&code=${Prefs.code}&id_bik=$id_bik&moip=${Prefs.moip}&crc=${Prefs.card}&cvc=${Prefs.cvc}"
         Log.i("goBike", "Send Server: $url")
 
@@ -445,7 +492,7 @@ class Home : AppCompatActivity() {
         }
     }
 
-    private fun stopRent() {
+    private fun rentStop() {
         val url = "http://gobike2.jelasticlw.com.br/rent/stop?" +
                   "id_cli=${Prefs.id}&code=${Prefs.code}&crc=${Prefs.card}&cvc=${Prefs.cvc}&id_rent=$idRent"
         Log.i("goBike", "Send Server: $url")
@@ -475,6 +522,29 @@ class Home : AppCompatActivity() {
             findViewById<ImageView>(R.id.iv_clock).visibility = View.INVISIBLE
             clock.stop()
             clock.visibility = View.INVISIBLE
+        }
+    }
+
+    private fun rentCancel() {
+        val url = "http://gobike2.jelasticlw.com.br/rent/cancel?id_cli=${Prefs.id}&code=${Prefs.code}&id_rent=$idRent"
+        Log.i("goBike", "Send Server: $url")
+
+        GlobalScope.launch(Dispatchers.Main) {
+            val deferred = async(Dispatchers.Default) {
+                try {
+                    khttp.post(url = url).jsonObject
+                } catch (e: JSONException) {
+                    e.printStackTrace()
+                    JSONObject()
+                }
+            }
+            val respCancel = deferred.await()
+            Log.i("goBike", "Receive Server: $respCancel")
+
+            if (respCancel.has("ok")) {
+                if (respCancel.getBoolean("ok")) Toast.makeText(applicationContext, "Cancelado", Toast.LENGTH_SHORT).show()
+                getStatus()
+            }
         }
     }
 
